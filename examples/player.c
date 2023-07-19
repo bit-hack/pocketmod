@@ -1,9 +1,12 @@
-#include <SDL2/SDL.h>
+#include <SDL.h>
+#undef main
+
 #include <stdio.h>
 #include <string.h>
 
+#define POCKETMOD_NO_INTERPOLATION
 #define POCKETMOD_IMPLEMENTATION
-#include "pocketmod.h"
+#include "../pocketmod.h"
 
 static void audio_callback(void *userdata, Uint8 *buffer, int bytes)
 {
@@ -15,6 +18,8 @@ static void audio_callback(void *userdata, Uint8 *buffer, int bytes)
 
 int main(int argc, char **argv)
 {
+    SDL_SetMainReady();
+
     const Uint32 allowed_changes = SDL_AUDIO_ALLOW_FREQUENCY_CHANGE;
     Uint32 start_time;
     pocketmod_context context;
@@ -38,7 +43,7 @@ int main(int argc, char **argv)
 
     /* Initialize the audio subsystem */
     format.freq = 44100;
-    format.format = AUDIO_F32;
+    format.format = AUDIO_S16;
     format.channels = 2;
     format.samples = 4096;
     format.callback = audio_callback;

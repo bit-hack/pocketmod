@@ -80,14 +80,14 @@ struct pocketmod_context
 
     /* Render state */
     _pocketmod_chan channels[POCKETMOD_MAX_CHANNELS];
-    uint8_t pattern_delay;       /* EEx pattern delay counter               */
+    uint8_t  pattern_delay;      /* EEx pattern delay counter               */
     uint32_t lfo_rng;            /* RNG used for the random LFO waveform    */
 
     /* Position in song (from least to most granular) */
-    int8_t pattern;              /* Current pattern in order                */
-    int8_t line;                 /* Current line in pattern                 */
+    int8_t  pattern;             /* Current pattern in order                */
+    int8_t  line;                /* Current line in pattern                 */
     int16_t tick;                /* Current tick in line                    */
-    float sample;                /* Current sample in tick                  */
+    float   sample;              /* Current sample in tick                  */
 };
 
 #ifdef POCKETMOD_IMPLEMENTATION
@@ -111,7 +111,7 @@ struct pocketmod_context
 #define POCKETMOD_VOLUME 0x02
 
 /* The size of one sample in bytes */
-#define POCKETMOD_SAMPLE_SIZE sizeof(float[2])
+#define POCKETMOD_SAMPLE_SIZE sizeof(int16_t[2])
 
 /* Finetune adjustment table. Three octaves for each finetune setting. */
 static const int8_t _pocketmod_finetune[16][36] = {
@@ -290,8 +290,8 @@ static void _pocketmod_next_line(pocketmod_context *c)
 
         /* Memorize effect parameter values */
         _pocketmod_chan *ch = &c->channels[i];
-        ch->effect = (effect >> 8) != 0xe ? (effect >> 8) : (effect >> 4);
-        ch->param = (effect >> 8) != 0xe ? (effect & 0xff) : (effect & 0x0f);
+        ch->effect = (effect >> 8) != 0xe ? (effect >> 8)   : (effect >> 4);
+        ch->param  = (effect >> 8) != 0xe ? (effect & 0xff) : (effect & 0x0f);
 
         /* Set sample */
         if (sample) {
@@ -328,14 +328,14 @@ static void _pocketmod_next_line(pocketmod_context *c)
         switch (ch->effect) {
 
             /* Memorize parameters */
-            case 0x3: POCKETMOD_MEM(ch->param3, ch->param); /* Fall through */
-            case 0x5: POCKETMOD_MEM(ch->target, period); break;
-            case 0x4: POCKETMOD_MEM2(ch->param4, ch->param); break;
-            case 0x7: POCKETMOD_MEM2(ch->param7, ch->param); break;
-            case 0xE1: POCKETMOD_MEM(ch->paramE1, ch->param); break;
-            case 0xE2: POCKETMOD_MEM(ch->paramE2, ch->param); break;
-            case 0xEA: POCKETMOD_MEM(ch->paramEA, ch->param); break;
-            case 0xEB: POCKETMOD_MEM(ch->paramEB, ch->param); break;
+            case 0x3:  POCKETMOD_MEM (ch->param3,  ch->param); /* Fall through */
+            case 0x5:  POCKETMOD_MEM (ch->target,  period);    break;
+            case 0x4:  POCKETMOD_MEM2(ch->param4,  ch->param); break;
+            case 0x7:  POCKETMOD_MEM2(ch->param7,  ch->param); break;
+            case 0xE1: POCKETMOD_MEM (ch->paramE1, ch->param); break;
+            case 0xE2: POCKETMOD_MEM (ch->paramE2, ch->param); break;
+            case 0xEA: POCKETMOD_MEM (ch->paramEA, ch->param); break;
+            case 0xEB: POCKETMOD_MEM (ch->paramEB, ch->param); break;
 
             /* 8xx: Set stereo balance (nonstandard) */
             case 0x8: {
@@ -496,8 +496,8 @@ static void _pocketmod_next_tick(pocketmod_context *c)
         /* Handle effects that only happen on the first tick of a line */
         if (c->tick == 0) {
             switch (ch->effect) {
-                case 0xE1: _pocketmod_pitch_slide(ch, -ch->paramE1); break;
-                case 0xE2: _pocketmod_pitch_slide(ch, +ch->paramE2); break;
+                case 0xE1: _pocketmod_pitch_slide (ch, -ch->paramE1);     break;
+                case 0xE2: _pocketmod_pitch_slide (ch, +ch->paramE2);     break;
                 case 0xEA: _pocketmod_volume_slide(ch, ch->paramEA << 4); break;
                 case 0xEB: _pocketmod_volume_slide(ch, ch->paramEB & 15); break;
                 default: break;
@@ -560,13 +560,13 @@ static void _pocketmod_next_tick(pocketmod_context *c)
 
         /* Update channel volume/pitch if either is out of date */
         if (ch->dirty & POCKETMOD_VOLUME) { _pocketmod_update_volume(c, ch); }
-        if (ch->dirty & POCKETMOD_PITCH) { _pocketmod_update_pitch(c, ch); }
+        if (ch->dirty & POCKETMOD_PITCH)  { _pocketmod_update_pitch (c, ch); }
     }
 }
 
 static void _pocketmod_render_channel(pocketmod_context *c,
                                       _pocketmod_chan *chan,
-                                      float *output,
+                                      int16_t *output,
                                       int32_t samples_to_write)
 {
     /* Gather some loop data */
@@ -578,31 +578,30 @@ static void _pocketmod_render_channel(pocketmod_context *c,
     const float   sample_end  = 1 + _pocketmod_min(loop_end, sample->length);
 
     /* Calculate left/right levels */
-    const float volume = chan->real_volume / (float) (128 * 64 * 4);
-    const float level_l = volume * (1.0f - chan->balance / 255.0f);
-    const float level_r = volume * (0.0f + chan->balance / 255.0f);
+    /* 64 * 256 = 0x4000 */
+    const int32_t level_l = (chan->real_volume * (255-chan->balance));
+    const int32_t level_r = (chan->real_volume *      chan->balance);
 
     /* Write samples */
     int32_t i, num;
     do {
-
         /* Calculate how many samples we can write in one go */
         num = (sample_end - chan->position) / chan->increment;
         num = _pocketmod_min(num, samples_to_write);
 
         /* Resample and write 'num' samples */
         for (i = 0; i < num; i++) {
-            int32_t x0 = chan->position;
+            const int32_t x0 = chan->position;
 #ifdef POCKETMOD_NO_INTERPOLATION
-            float s = sample->data[x0];
+            const int32_t s = sample->data[x0];
 #else
             int32_t x1 = x0 + 1 - loop_length * (x0 + 1 >= loop_end);
             float t = chan->position - x0;
             float s = (1.0f - t) * sample->data[x0] + t * sample->data[x1];
 #endif
             chan->position += chan->increment;
-            *output++ += level_l * s;
-            *output++ += level_r * s;
+            *output++ += (level_l * s) / (64 * 4);  // 4=numchannels
+            *output++ += (level_r * s) / (64 * 4);
         }
 
         /* Rewind the sample when reaching the loop point */
@@ -686,11 +685,11 @@ static int32_t _pocketmod_ident(pocketmod_context *c, uint8_t *data, int32_t siz
     }
 
     /* It looks like we have an older 15-instrument MOD */
-    c->length = data[470];
-    c->reset = data[471];
-    c->order = &data[472];
-    c->patterns = &data[600];
-    c->num_samples = 15;
+    c->length       = data[470];
+    c->reset        = data[471];
+    c->order        = &data[472];
+    c->patterns     = &data[600];
+    c->num_samples  = 15;
     c->num_channels = 4;
     return 1;
 }
@@ -794,7 +793,7 @@ int32_t pocketmod_render(pocketmod_context *c, void *buffer, int32_t buffer_size
     int32_t i, samples_rendered = 0;
     int32_t samples_remaining = buffer_size / POCKETMOD_SAMPLE_SIZE;
     if (c && buffer) {
-        float (*output)[2] = (int16_t(*)[2]) buffer;
+        int16_t (*output)[2] = (int16_t(*)[2]) buffer;
         while (samples_remaining > 0) {
 
             /* Calculate the number of samples left in this tick */
@@ -810,8 +809,8 @@ int32_t pocketmod_render(pocketmod_context *c, void *buffer, int32_t buffer_size
                 }
             }
             samples_remaining -= num;
-            samples_rendered += num;
-            output += num;
+            samples_rendered  += num;
+            output            += num;
 
             /* Advance song position by 'num' samples */
             if ((c->sample += num) >= c->samples_per_tick) {
