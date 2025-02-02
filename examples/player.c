@@ -4,8 +4,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#define POCKETMOD_NO_INTERPOLATION
-#define POCKETMOD_IMPLEMENTATION
 #include "../pocketmod.h"
 
 static void audio_callback(void *userdata, Uint8 *buffer, int bytes)
@@ -42,10 +40,10 @@ int main(int argc, char **argv)
     }
 
     /* Initialize the audio subsystem */
-    format.freq = 44100;
-    format.format = AUDIO_S16;
+    format.freq     = 44100;
+    format.format   = AUDIO_S16;
     format.channels = 2;
-    format.samples = 4096;
+    format.samples  = 4096;
     format.callback = audio_callback;
     format.userdata = &context;
     device = SDL_OpenAudioDevice(NULL, 0, &format, &format, allowed_changes);
