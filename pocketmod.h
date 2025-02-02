@@ -14,9 +14,7 @@ typedef struct pocketmod_context pocketmod_context;
 int32_t pocketmod_init      (pocketmod_context *c, const void *data, int32_t size, int32_t rate);
 int32_t pocketmod_render    (pocketmod_context *c, void *buffer, int32_t size);
 int32_t pocketmod_loop_count(pocketmod_context *c);
-
-int32_t pocketmod_update    (pocketmod_context *c, uint64_t total_ms);
-
+int32_t pocketmod_tick      (pocketmod_context *c);
 
 #ifndef POCKETMOD_MAX_CHANNELS
 #define POCKETMOD_MAX_CHANNELS 32
@@ -26,12 +24,19 @@ int32_t pocketmod_update    (pocketmod_context *c, uint64_t total_ms);
 #define POCKETMOD_MAX_SAMPLES 31
 #endif
 
-typedef struct {
+typedef struct
+{
+    uint8_t  index;              /* Sample index                            */
     int8_t  *data;               /* Sample data buffer                      */
     uint32_t length;             /* Data length (in bytes)                  */
+    int32_t  loop_start;         /* Loop start pos (unused)                 */
+    int32_t  loop_length;        /* Loop length                             */
+    int32_t  loop_end;           /* Loop end pos                            */
 } _pocketmod_sample;
 
-typedef struct {
+typedef struct
+{
+    uint8_t  index;              /* Channel index                           */
     uint8_t  dirty;              /* Pitch/volume dirty flags                */
     uint8_t  sample;             /* Sample number (0..31)                   */
     uint8_t  volume;             /* Base volume without tremolo (0..64)     */
@@ -76,6 +81,7 @@ struct pocketmod_context
     int32_t samples_per_second;  /* Sample rate (set by user)               */
     int32_t ticks_per_line;      /* A.K.A. song speed (initially 6)         */
     float   samples_per_tick;    /* Depends on sample rate and BPM          */
+    float   ticks_per_second;    /* ticks per second rate                   */
 
     /* Loop detection state */
     uint8_t visited[16];         /* Bit mask of previously visited patterns */
