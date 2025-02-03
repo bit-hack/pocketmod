@@ -1,3 +1,5 @@
+#include <stdio.h>
+
 #include "pocketmod.h"
 
 
@@ -108,22 +110,32 @@ static int32_t _pocketmod_lfo(pocketmod_context *c, _pocketmod_chan *ch, int32_t
     }
 }
 
-static void _pocketmod_upload_sample(_pocketmod_sample* sample) {
-  //XXX: hook point for sample upload
+static void _pocketmod_upload_sample(pocketmod_context* c, _pocketmod_sample* sample) {
+
+  if (c->events) {
+    c->events->on_upload_sample(sample);
+  }
 }
 
-static void _pocketmod_sample_set(_pocketmod_chan* ch, int32_t sample) {
-  //XXX: hook point for channel set
+static void _pocketmod_sample_set(pocketmod_context* c, _pocketmod_chan* ch, int32_t sample) {
+
   ch->sample = sample;
+
+  if (c->events) {
+    c->events->on_sample_set(ch, sample);
+  }
 }
 
-static void _pocketmod_position_set(_pocketmod_chan* ch, float position) {
-  //XXX: hook point for channel position set
+static void _pocketmod_position_set(pocketmod_context* c, _pocketmod_chan* ch, float position) {
+
   ch->position = position;
+
+  if (c->events) {
+    c->events->on_position_set(ch, position);
+  }
 }
 
 static void _pocketmod_period_set(pocketmod_context *c, _pocketmod_chan* ch, float period) {
-  //XXX: hook point for channel increment set
 
   // note: 3546895 is the PAL colorclock rate
   // the replay rate is:
@@ -133,22 +145,33 @@ static void _pocketmod_period_set(pocketmod_context *c, _pocketmod_chan* ch, flo
   // note: period counter is 16bits wide
 
   ch->increment = 3546894.6f / (period * c->samples_per_second);
+
+  if (c->events) {
+    c->events->on_period_set(ch, period);
+  }
 }
 
-static void _pocketmod_volume_set(_pocketmod_chan* ch, uint8_t value) {
+static void _pocketmod_volume_set(pocketmod_context* c, _pocketmod_chan* ch, uint8_t value) {
 
   // note: volume can be up 0->63
 
   // note: volume is done using a 6bit pwm chopper circuit
   // https://www.linusakesson.net/music/paulimba/index.php
 
-  //XXX: hook point for channel volume
   ch->real_volume = value;
+
+  if (c->events) {
+    c->events->on_volume_set(ch, value);
+  }
 }
 
-static void _pocketmod_balance_set(_pocketmod_chan* ch, uint8_t balance) {
-  //XXX: hook point for channel balance set
+static void _pocketmod_balance_set(pocketmod_context* c, _pocketmod_chan* ch, uint8_t balance) {
+
   ch->balance = balance;
+
+  if (c->events) {
+    c->events->on_balance_set(ch, balance);
+  }
 }
 
 static void _pocketmod_update_pitch(pocketmod_context *c, _pocketmod_chan *ch)
@@ -191,7 +214,7 @@ static void _pocketmod_update_volume(pocketmod_context *c, _pocketmod_chan *ch)
         int32_t step = ch->lfo_step * (ch->param7 >> 4);
         volume += _pocketmod_lfo(c, ch, step) * (ch->param7 & 0x0f) >> 6;
     }
-    _pocketmod_volume_set(ch, _pocketmod_clamp_volume(volume));
+    _pocketmod_volume_set(c, ch, _pocketmod_clamp_volume(volume));
     ch->dirty &= ~POCKETMOD_VOLUME;
 }
 
@@ -251,14 +274,14 @@ static void _pocketmod_next_line(pocketmod_context *c)
         if (sample) {
             if (sample <= POCKETMOD_MAX_SAMPLES) {
                 uint8_t *sample_data = POCKETMOD_SAMPLE(c, sample);
-                _pocketmod_sample_set(ch, sample);
+                _pocketmod_sample_set(c, ch, sample);
                 ch->finetune = sample_data[2] & 0x0f;
                 ch->volume = _pocketmod_min(sample_data[3], 0x40);
                 if (ch->effect != 0xED) {
                     ch->dirty |= POCKETMOD_VOLUME;
                 }
             } else {
-                _pocketmod_sample_set(ch, 0);
+                _pocketmod_sample_set(c, ch, 0);
             }
         }
 
@@ -270,7 +293,7 @@ static void _pocketmod_next_line(pocketmod_context *c)
                 if (ch->effect != 0xED) {
                     ch->period = period;
                     ch->dirty |= POCKETMOD_PITCH;
-                    _pocketmod_position_set(ch, 0.0f);  // reset position
+                    _pocketmod_position_set(c, ch, 0.0f);  // reset position
                     ch->lfo_step = 0;
                 } else {
                     ch->delayed = period;
@@ -293,14 +316,14 @@ static void _pocketmod_next_line(pocketmod_context *c)
 
             /* 8xx: Set stereo balance (nonstandard) */
             case 0x8: {
-                _pocketmod_balance_set(ch, ch->param);
+                _pocketmod_balance_set(c, ch, ch->param);
             } break;
 
             /* 9xx: Set sample offset */
             case 0x9: {
                 if (period != 0 || sample != 0) {
                     ch->param9 = ch->param ? ch->param : ch->param9;
-                    _pocketmod_position_set(ch, ch->param9 << 8);
+                    _pocketmod_position_set(c, ch, ch->param9 << 8);
                 }
             } break;
 
@@ -353,7 +376,7 @@ static void _pocketmod_next_line(pocketmod_context *c)
 
             /* E8x: Set stereo balance (nonstandard) */
             case 0xE8: {
-                _pocketmod_balance_set(ch, ch->param << 4);
+                _pocketmod_balance_set(c, ch, ch->param << 4);
             } break;
 
             /* EEx: Pattern delay */
@@ -421,7 +444,7 @@ static void _pocketmod_next_tick(pocketmod_context *c)
             /* E9x: Retrigger note every x ticks */
             case 0xE9: {
                 if (!(param && c->tick % param)) {
-                    _pocketmod_position_set(ch, 0.0f);
+                    _pocketmod_position_set(c, ch, 0.0f);
                     ch->lfo_step = 0;
                 }
             } break;
@@ -439,7 +462,7 @@ static void _pocketmod_next_tick(pocketmod_context *c)
                 if (c->tick == param && ch->sample) {
                     ch->dirty |= POCKETMOD_VOLUME | POCKETMOD_PITCH;
                     ch->period = ch->delayed;
-                    _pocketmod_position_set(ch, 0.f);
+                    _pocketmod_position_set(c, ch, 0.f);
                     ch->lfo_step = 0;
                 }
             } break;
@@ -645,8 +668,11 @@ static int32_t _pocketmod_ident(pocketmod_context *c, uint8_t *data, int32_t siz
     return 1;
 }
 
-int32_t pocketmod_init(pocketmod_context *c, const void *data, int32_t size, int32_t rate)
+int32_t pocketmod_init(pocketmod_context *c, pocketmod_events* e, const void *data, int32_t size, int32_t rate)
 {
+    /* setup event notifiers */
+    c->events = e;
+
     int32_t i, remaining, header_bytes, pattern_bytes;
     uint8_t *byte = (uint8_t*) c;
     int8_t *sample_data;
@@ -728,7 +754,7 @@ int32_t pocketmod_init(pocketmod_context *c, const void *data, int32_t size, int
         sample->loop_length = ((data[6] << 8) | data[7]) << 1;
         sample->loop_end    = sample->loop_length > 2 ? sample->loop_start + sample->loop_length : 0xffffff;
 
-        _pocketmod_upload_sample(sample);
+        _pocketmod_upload_sample(c, sample);
 
         //DEBUG: calculate the used sample size
         total_size += _pocketmod_min(sample->loop_end, sample->length);
@@ -744,7 +770,7 @@ int32_t pocketmod_init(pocketmod_context *c, const void *data, int32_t size, int
     for (i = 0; i < c->num_channels; i++) {
         c->channels[i].index = i;
         uint8_t balance = 0x80 + ((((i + 1) >> 1) & 1) ? 0x20 : -0x20);
-        _pocketmod_balance_set(c->channels + i, balance);
+        _pocketmod_balance_set(c, c->channels + i, balance);
     }
 
     /* Prepare to render from the start */
@@ -820,4 +846,5 @@ int32_t pocketmod_tick(pocketmod_context* c)
       c->loop_count++;
     }
   }
+  return 0;
 }

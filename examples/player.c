@@ -20,12 +20,13 @@ int main(int argc, char **argv)
 
     const Uint32 allowed_changes = SDL_AUDIO_ALLOW_FREQUENCY_CHANGE;
     Uint32 start_time;
-    pocketmod_context context;
+    pocketmod_context context = { 0 };
     SDL_AudioSpec format;
     SDL_AudioDeviceID device;
     SDL_RWops *mod_file;
     char *mod_data, *slash;
     size_t mod_size;
+    pocketmod_events events = { 0 };
 
     /* Print usage if no file was given */
     if (argc != 2) {
@@ -66,7 +67,7 @@ int main(int argc, char **argv)
     SDL_RWclose(mod_file);
 
     /* Initialize the renderer */
-    if (!pocketmod_init(&context, mod_data, mod_size, format.freq)) {
+    if (!pocketmod_init(&context, NULL, mod_data, mod_size, format.freq)) {
         printf("error: '%s' is not a valid MOD file\n", argv[1]);
         return -1;
     }

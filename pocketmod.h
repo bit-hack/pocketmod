@@ -10,8 +10,9 @@ extern "C" {
 #endif
 
 typedef struct pocketmod_context pocketmod_context;
+typedef struct pocketmod_events pocketmod_events;
 
-int32_t pocketmod_init      (pocketmod_context *c, const void *data, int32_t size, int32_t rate);
+int32_t pocketmod_init      (pocketmod_context *c, pocketmod_events *e, const void *data, int32_t size, int32_t rate);
 int32_t pocketmod_render    (pocketmod_context *c, void *buffer, int32_t size);
 int32_t pocketmod_loop_count(pocketmod_context *c);
 int32_t pocketmod_tick      (pocketmod_context *c);
@@ -23,6 +24,7 @@ int32_t pocketmod_tick      (pocketmod_context *c);
 #ifndef POCKETMOD_MAX_SAMPLES
 #define POCKETMOD_MAX_SAMPLES 31
 #endif
+
 
 typedef struct
 {
@@ -64,8 +66,29 @@ typedef struct
     float    increment;          /* Position increment per output sample    */
 } _pocketmod_chan;
 
+typedef void (*pm_upload_sample_t)(_pocketmod_sample* sample);
+typedef void (*pm_sample_set)  (_pocketmod_chan* ch, int32_t sample);
+typedef void (*pm_position_set)(_pocketmod_chan* ch, float position);
+typedef void (*pm_period_set)  (_pocketmod_chan* ch, float period);
+typedef void (*pm_volume_set)  (_pocketmod_chan* ch, uint8_t value);
+typedef void (*pm_balance_set) (_pocketmod_chan* ch, uint8_t balance);
+
+struct pocketmod_events
+{
+  /* Notify event callbacks */
+  pm_upload_sample_t on_upload_sample;
+  pm_sample_set      on_sample_set;
+  pm_position_set    on_position_set;
+  pm_period_set      on_period_set;
+  pm_volume_set      on_volume_set;
+  pm_balance_set     on_balance_set;
+};
+
 struct pocketmod_context
 {
+    /* Event notifiers */
+    pocketmod_events *events;
+
     /* Read-only song data */
     _pocketmod_sample samples[POCKETMOD_MAX_SAMPLES];
     uint8_t *source;             /* Pointer to source MOD data              */
