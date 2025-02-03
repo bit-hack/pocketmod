@@ -67,7 +67,7 @@ int main(int argc, char **argv)
     SDL_RWclose(mod_file);
 
     /* Initialize the renderer */
-    if (!pocketmod_init(&context, NULL, mod_data, mod_size, format.freq)) {
+    if (!pocketmod_init(&context, NULL, mod_data, (int32_t)mod_size, format.freq)) {
         printf("error: '%s' is not a valid MOD file\n", argv[1]);
         return -1;
     }

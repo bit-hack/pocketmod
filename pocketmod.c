@@ -323,7 +323,7 @@ static void _pocketmod_next_line(pocketmod_context *c)
             case 0x9: {
                 if (period != 0 || sample != 0) {
                     ch->param9 = ch->param ? ch->param : ch->param9;
-                    _pocketmod_position_set(c, ch, ch->param9 << 8);
+                    _pocketmod_position_set(c, ch, (float)(ch->param9 << 8));
                 }
             } break;
 
@@ -549,7 +549,7 @@ static void _pocketmod_render_channel(pocketmod_context *c,
     /* Gather some loop data */
     _pocketmod_sample *sample = &c->samples[chan->sample - 1];
     uint8_t *data = POCKETMOD_SAMPLE(c, chan->sample);
-    const float   sample_end  = 1 + _pocketmod_min(sample->loop_end, sample->length);
+    const float sample_end = (float)(1 + _pocketmod_min(sample->loop_end, sample->length));
 
     /* Calculate left/right levels */
     /* 64 * 256 = 0x4000 */
@@ -560,12 +560,12 @@ static void _pocketmod_render_channel(pocketmod_context *c,
     int32_t i, num;
     do {
         /* Calculate how many samples we can write in one go */
-        num = (sample_end - chan->position) / chan->increment;
+        num = (int32_t)( (sample_end - chan->position) / chan->increment );
         num = _pocketmod_min(num, samples_to_write);
 
         /* Resample and write 'num' samples */
         for (i = 0; i < num; i++) {
-            const int32_t x0 = chan->position;
+            const int32_t x0 = (int32_t)(chan->position);
 #ifdef POCKETMOD_NO_INTERPOLATION
             const int32_t s = sample->data[x0];
 #else
