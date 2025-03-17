@@ -122,7 +122,12 @@ static void _pocketmod_sample_set(pocketmod_context* c, _pocketmod_chan* ch, int
   ch->sample = sample;
 
   if (c->events) {
-    c->events->on_sample_set(ch, sample);
+    if (sample >= 1) {
+      c->events->on_sample_set(ch, c->samples + (sample - 1));
+    }
+    else {
+      c->events->on_sample_set(ch, NULL);
+    }
   }
 }
 
@@ -670,8 +675,6 @@ static int32_t _pocketmod_ident(pocketmod_context *c, uint8_t *data, int32_t siz
 
 int32_t pocketmod_init(pocketmod_context *c, pocketmod_events* e, const void *data, int32_t size, int32_t rate)
 {
-    /* setup event notifiers */
-    c->events = e;
 
     int32_t i, remaining, header_bytes, pattern_bytes;
     uint8_t *byte = (uint8_t*) c;
@@ -735,6 +738,9 @@ int32_t pocketmod_init(pocketmod_context *c, pocketmod_events* e, const void *da
     if (header_bytes + pattern_bytes > size) {
         return 0;
     }
+
+    /* setup event notifiers */
+    c->events = e;
 
     //DEBUG: used to calcuate the total required sample space
     uint32_t total_size = 0;

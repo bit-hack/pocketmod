@@ -12,4 +12,10 @@ add_executable(pocketmod
   pocketmod.c
 )
 
+add_executable(fpgaplay
+  examples/fpgaplay.c
+  pocketmod.h
+  pocketmod.c
+)
+
 target_link_libraries(pocketmod ${SDL_LIBRARY})

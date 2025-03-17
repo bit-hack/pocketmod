@@ -67,21 +67,21 @@ typedef struct
 } _pocketmod_chan;
 
 typedef void (*pm_upload_sample_t)(_pocketmod_sample* sample);
-typedef void (*pm_sample_set)  (_pocketmod_chan* ch, int32_t sample);
-typedef void (*pm_position_set)(_pocketmod_chan* ch, float position);
-typedef void (*pm_period_set)  (_pocketmod_chan* ch, float period);
-typedef void (*pm_volume_set)  (_pocketmod_chan* ch, uint8_t value);
-typedef void (*pm_balance_set) (_pocketmod_chan* ch, uint8_t balance);
+typedef void (*pm_sample_set_t)   (_pocketmod_chan* ch, _pocketmod_sample* sample);
+typedef void (*pm_position_set_t) (_pocketmod_chan* ch, float position);
+typedef void (*pm_period_set_t)   (_pocketmod_chan* ch, float period);
+typedef void (*pm_volume_set_t)   (_pocketmod_chan* ch, uint8_t value);
+typedef void (*pm_balance_set_t)  (_pocketmod_chan* ch, uint8_t balance);
 
 struct pocketmod_events
 {
   /* Notify event callbacks */
   pm_upload_sample_t on_upload_sample;
-  pm_sample_set      on_sample_set;
-  pm_position_set    on_position_set;
-  pm_period_set      on_period_set;
-  pm_volume_set      on_volume_set;
-  pm_balance_set     on_balance_set;
+  pm_sample_set_t    on_sample_set;
+  pm_position_set_t  on_position_set;
+  pm_period_set_t    on_period_set;
+  pm_volume_set_t    on_volume_set;
+  pm_balance_set_t   on_balance_set;
 };
 
 struct pocketmod_context
