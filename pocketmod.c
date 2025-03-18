@@ -616,107 +616,55 @@ static void _pocketmod_render_channel(_pocketmod_chan *chan,
     } while (num > 0);
 }
 
-static int32_t _pocketmod_ident(uint8_t *data, int32_t size)
+static int32_t _pocketmod_ident(int32_t size)
 {
-    int32_t i, j;
-
     /* 31-instrument files are at least 1084 bytes long */
-    if (size >= 1084) {
+    if (size < 1084) {
+      return 0;
+    }
 
-        /* The format tag is located at offset 1080 */
-        uint8_t *tag = data + 1080;
+    uint8_t tag[4] = { 0 };
+    file_seek_to(1080);
+    fread(tag, 1, 4, file);
 
-        /* List of recognized format tags (possibly incomplete) */
-        static const struct {
-            char name[5];
-            char channels;
-        } tags[] = {
-            /* TODO: FLT8 intentionally omitted because I haven't been able */
-            /* to find a specimen to test its funky pattern pairing format  */
-            {"M.K.",  4}, {"M!K!",  4}, {"FLT4",  4}, {"4CHN",  4},
-            {"OKTA",  8}, {"OCTA",  8}, {"CD81",  8}, {"FA08",  8},
-            {"1CHN",  1}, {"2CHN",  2}, {"3CHN",  3}, {"4CHN",  4},
-            {"5CHN",  5}, {"6CHN",  6}, {"7CHN",  7}, {"8CHN",  8},
-            {"9CHN",  9}, {"10CH", 10}, {"11CH", 11}, {"12CH", 12},
-            {"13CH", 13}, {"14CH", 14}, {"15CH", 15}, {"16CH", 16},
-            {"17CH", 17}, {"18CH", 18}, {"19CH", 19}, {"20CH", 20},
-            {"21CH", 21}, {"22CH", 22}, {"23CH", 23}, {"24CH", 24},
-            {"25CH", 25}, {"26CH", 26}, {"27CH", 27}, {"28CH", 28},
-            {"29CH", 29}, {"30CH", 30}, {"31CH", 31}, {"32CH", 32}
-        };
+    static const struct { char name[5]; } tags[] = { {"M.K."}, {"M!K!"}, {"FLT4"}, {"4CHN"} };
 
-        /* Check the format tag to determine if this is a 31-sample MOD */
-        for (i = 0; i < (int32_t) (sizeof(tags) / sizeof(*tags)); i++) {
-            if (tags[i].name[0] == tag[0] && tags[i].name[1] == tag[1]
-             && tags[i].name[2] == tag[2] && tags[i].name[3] == tag[3]) {
+    /* Check the format tag to determine if this is a 31-sample MOD */
+    for (int32_t i = 0; i < (int32_t) (sizeof(tags) / sizeof(*tags)); i++) {
+        if (tags[i].name[0] == tag[0] &&
+            tags[i].name[1] == tag[1] &&
+            tags[i].name[2] == tag[2] &&
+            tags[i].name[3] == tag[3]) {
 
-                c.num_channels = tags[i].channels;
-                if (c.num_channels > 4) {
-                  return 0;  // we only handle 4 channels currently
-                }
+            file_seek_to(950); c.length = read_u8();
+            file_seek_to(951); c.reset  = read_u8();
 
-                file_seek_to(950); c.length = read_u8();
-                file_seek_to(951); c.reset  = read_u8();
-
-                file_seek_to(952);
-                fread(c.order, 1, 128, file);
-                c.pattern_addr = 1084;
-//              c.patterns    = &data[1084];  // fixme
-                c.num_samples = 31;
-                return 1;
-            }
+            file_seek_to(952);
+            fread(c.order, 1, 128, file);
+            c.pattern_addr = 1084;
+            c.num_samples  = 31;
+            c.num_channels = 4;
+            return 1;
         }
     }
 
-    /* A 15-instrument MOD has to be at least 600 bytes long */
-    if (size < 600) {
-        return 0;
-    }
-
-    /* Check that the song title only contains ASCII bytes (or null) */
-    for (i = 0; i < 20; i++) {
-        if (data[i] != '\0' && (data[i] < ' ' || data[i] > '~')) {
-            return 0;
-        }
-    }
-
-    /* Check that sample names only contain ASCII bytes (or null) */
-    for (i = 0; i < 15; i++) {
-        for (j = 0; j < 22; j++) {
-            char chr = data[20 + i * 30 + j];
-            if (chr != '\0' && (chr < ' ' || chr > '~')) {
-                return 0;
-            }
-        }
-    }
-
-    /* It looks like we have an older 15-instrument MOD */
-    file_seek_to(470); c.length = read_u8();
-    file_seek_to(471); c.reset  = read_u8();
-
-    file_seek_to(472);
-    fread(c.order, 1, 128, file);
-    c.pattern_addr = 600;
-//  c.patterns     = &data[600];  // fixme
-    c.num_samples  = 15;
-    c.num_channels = 4;
-    return 1;
+    return 0;
 }
 
-int32_t pocketmod_init(pocketmod_events* e, FILE *fd, const void *data, int32_t size, int32_t rate)
+int32_t pocketmod_init(pocketmod_events* e, FILE *fd, int32_t size, int32_t rate)
 {
     file = fd;
     int32_t i, remaining, header_bytes, pattern_bytes;
     uint32_t sample_offset = 0;
 
     /* Check that arguments look more or less sane */
-    if (!file || !data || rate <= 0 || size <= 0) {
+    if (!file || rate <= 0 || size <= 0) {
         return 0;
     }
 
     /* Zero out the whole context and identify the MOD type */
     _pocketmod_zero(&c, sizeof(pocketmod_context));
-    if (!_pocketmod_ident(data, size)) {
+    if (!_pocketmod_ident(size)) {
         return 0;
     }
 

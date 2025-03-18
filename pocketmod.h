@@ -10,9 +10,9 @@ extern "C" {
 #endif
 
 typedef struct pocketmod_context pocketmod_context;
-typedef struct pocketmod_events pocketmod_events;
+typedef struct pocketmod_events  pocketmod_events;
 
-int32_t pocketmod_init      (pocketmod_events *e, FILE* file, const void *data, int32_t size, int32_t rate);
+int32_t pocketmod_init      (pocketmod_events *e, FILE* file, int32_t size, int32_t rate);
 int32_t pocketmod_render    (void *buffer, int32_t size);
 int32_t pocketmod_loop_count();
 int32_t pocketmod_tick      ();
@@ -28,8 +28,8 @@ int32_t pocketmod_tick      ();
 
 typedef struct
 {
+    int8_t*  data;               /* Sample data buffer                      */
     uint8_t  index;              /* Sample index                            */
-    int8_t  *data;               /* Sample data buffer                      */
     uint32_t length;             /* Data length (in bytes)                  */
     int32_t  loop_start;         /* Loop start pos (unused)                 */
     int32_t  loop_length;        /* Loop length                             */

@@ -6,6 +6,7 @@
 
 #include "../pocketmod.h"
 
+
 static void audio_callback(void *userdata, Uint8 *buffer, int bytes)
 {
     int i = 0;
@@ -22,7 +23,7 @@ int main(int argc, char **argv)
     Uint32 start_time;
     SDL_AudioSpec format;
     SDL_AudioDeviceID device;
-    char *mod_data, *slash;
+    char *slash;
     size_t mod_size;
     pocketmod_events events = { 0 };
 
@@ -51,21 +52,6 @@ int main(int argc, char **argv)
         return -1;
     }
 
-#if 0
-    SDL_RWops* mod_file;
-    /* Read the MOD file into a heap block */
-    if (!(mod_file = SDL_RWFromFile(argv[1], "rb"))) {
-        printf("error: can't open '%s' for reading\n", argv[1]);
-        return -1;
-    } else if (!(mod_data = SDL_malloc(mod_size = SDL_RWsize(mod_file)))) {
-        printf("error: can't allocate memory for '%s'\n", argv[1]);
-        return -1;
-    } else if (!SDL_RWread(mod_file, mod_data, mod_size, 1)) {
-        printf("error: can't read file '%s'\n", argv[1]);
-        return -1;
-    }
-    SDL_RWclose(mod_file);
-#else
     FILE* mod_file = fopen(argv[1], "rb");
     if (!mod_file) {
       printf("error: can't open '%s' for reading\n", argv[1]);
@@ -74,16 +60,9 @@ int main(int argc, char **argv)
     fseek(mod_file, 0, SEEK_END);
     mod_size = ftell(mod_file);
     fseek(mod_file, 0, SEEK_SET);
-    mod_data = malloc(mod_size);
-    if (!mod_data) {
-      return -1;
-    }
-    fread(mod_data, 1, mod_size, mod_file);
-    fseek(mod_file, 0, SEEK_SET);
-#endif
 
     /* Initialize the renderer */
-    if (!pocketmod_init(NULL, mod_file, mod_data, (int32_t)mod_size, format.freq)) {
+    if (!pocketmod_init(NULL, mod_file, (int32_t)mod_size, format.freq)) {
         printf("error: '%s' is not a valid MOD file\n", argv[1]);
         return -1;
     }
