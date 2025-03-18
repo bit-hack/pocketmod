@@ -12,10 +12,10 @@ extern "C" {
 typedef struct pocketmod_context pocketmod_context;
 typedef struct pocketmod_events pocketmod_events;
 
-int32_t pocketmod_init      (pocketmod_context *c, pocketmod_events *e, const void *data, int32_t size, int32_t rate);
-int32_t pocketmod_render    (pocketmod_context *c, void *buffer, int32_t size);
-int32_t pocketmod_loop_count(pocketmod_context *c);
-int32_t pocketmod_tick      (pocketmod_context *c);
+int32_t pocketmod_init      (pocketmod_events *e, FILE* file, const void *data, int32_t size, int32_t rate);
+int32_t pocketmod_render    (void *buffer, int32_t size);
+int32_t pocketmod_loop_count();
+int32_t pocketmod_tick      ();
 
 #ifndef POCKETMOD_MAX_CHANNELS
 #define POCKETMOD_MAX_CHANNELS 32
@@ -34,6 +34,8 @@ typedef struct
     int32_t  loop_start;         /* Loop start pos (unused)                 */
     int32_t  loop_length;        /* Loop length                             */
     int32_t  loop_end;           /* Loop end pos                            */
+    uint8_t  finetune;           /* 0 - 15 */
+    uint8_t  volume;             /* 0 - 64 */
 } _pocketmod_sample;
 
 typedef struct
@@ -91,8 +93,8 @@ struct pocketmod_context
 
     /* Read-only song data */
     _pocketmod_sample samples[POCKETMOD_MAX_SAMPLES];
-    uint8_t *source;             /* Pointer to source MOD data              */
-    uint8_t *order;              /* Pattern order table                     */
+//  uint8_t *source;             /* Pointer to source MOD data              */
+    uint8_t  order[128];         /* Pattern order table                     */ /* fixme: malloc? */
     uint8_t *patterns;           /* Start of pattern data                   */
     uint8_t  length;             /* Patterns in the order (1..128)          */
     uint8_t  reset;              /* Pattern to loop back to (0..127)        */

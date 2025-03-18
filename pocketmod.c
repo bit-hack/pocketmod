@@ -16,9 +16,6 @@
               | (((src) & 0xf0) ? ((src) & 0xf0) : ((dst) & 0xf0)); \
     } while (0)
 
-/* Shortcut to sample metadata (sample must be nonzero) */
-#define POCKETMOD_SAMPLE(c, sample) ((c)->source + 12 + 30 * (sample))
-
 /* Channel dirty flags */
 #define POCKETMOD_PITCH  0x01
 #define POCKETMOD_VOLUME 0x02
@@ -49,6 +46,29 @@ static const int8_t _pocketmod_finetune[16][36] = {
 /* Min/max helper functions */
 static int32_t _pocketmod_min(int32_t x, int32_t y) { return x < y ? x : y; }
 static int32_t _pocketmod_max(int32_t x, int32_t y) { return x > y ? x : y; }
+
+static pocketmod_context c;
+static FILE* file;
+
+static uint8_t read_u8() {
+  uint8_t out = 0;
+  fread(&out, sizeof(out), 1, file);
+  return out;
+}
+
+static uint16_t read_u16() {
+  const uint16_t b0 = read_u8();
+  const uint16_t b1 = read_u8();
+  return (b0 << 8) | b1;
+}
+
+static void file_seek_to(uint32_t offset) {
+  fseek(file, offset, SEEK_SET);
+}
+
+static void file_skip(uint32_t bytes) {
+  fseek(file, bytes, SEEK_CUR);
+}
 
 /* Clamp a volume value to the 0..64 range */
 static int32_t _pocketmod_clamp_volume(int32_t x)
@@ -99,48 +119,48 @@ static int32_t _pocketmod_sin(int32_t step)
 }
 
 /* Oscillators for vibrato/tremolo effects */
-static int32_t _pocketmod_lfo(pocketmod_context *c, _pocketmod_chan *ch, int32_t step)
+static int32_t _pocketmod_lfo(_pocketmod_chan *ch, int32_t step)
 {
     switch (ch->lfo_type[ch->effect == 7] & 3) {
         case 0: return _pocketmod_sin(step & 0x3f);         /* Sine   */
         case 1: return 0xff - ((step & 0x3f) << 3);         /* Saw    */
         case 2: return (step & 0x3f) < 0x20 ? 0xff : -0xff; /* Square */
-        case 3: return (c->lfo_rng & 0x1ff) - 0xff;         /* Random */
+        case 3: return (c.lfo_rng & 0x1ff) - 0xff;         /* Random */
         default: return 0; /* Hush little compiler */
     }
 }
 
-static void _pocketmod_upload_sample(pocketmod_context* c, _pocketmod_sample* sample) {
+static void _pocketmod_upload_sample(_pocketmod_sample* sample) {
 
-  if (c->events) {
-    c->events->on_upload_sample(sample);
+  if (c.events) {
+    c.events->on_upload_sample(sample);
   }
 }
 
-static void _pocketmod_sample_set(pocketmod_context* c, _pocketmod_chan* ch, int32_t sample) {
+static void _pocketmod_sample_set(_pocketmod_chan* ch, int32_t sample) {
 
   ch->sample = sample;
 
-  if (c->events) {
+  if (c.events) {
     if (sample >= 1) {
-      c->events->on_sample_set(ch, c->samples + (sample - 1));
+      c.events->on_sample_set(ch, c.samples + (sample - 1));
     }
     else {
-      c->events->on_sample_set(ch, NULL);
+      c.events->on_sample_set(ch, NULL);
     }
   }
 }
 
-static void _pocketmod_position_set(pocketmod_context* c, _pocketmod_chan* ch, float position) {
+static void _pocketmod_position_set(_pocketmod_chan* ch, float position) {
 
   ch->position = position;
 
-  if (c->events) {
-    c->events->on_position_set(ch, position);
+  if (c.events) {
+    c.events->on_position_set(ch, position);
   }
 }
 
-static void _pocketmod_period_set(pocketmod_context *c, _pocketmod_chan* ch, float period) {
+static void _pocketmod_period_set(_pocketmod_chan* ch, float period) {
 
   // note: 3546895 is the PAL colorclock rate
   // the replay rate is:
@@ -149,14 +169,14 @@ static void _pocketmod_period_set(pocketmod_context *c, _pocketmod_chan* ch, flo
 
   // note: period counter is 16bits wide
 
-  ch->increment = 3546894.6f / (period * c->samples_per_second);
+  ch->increment = 3546894.6f / (period * c.samples_per_second);
 
-  if (c->events) {
-    c->events->on_period_set(ch, period);
+  if (c.events) {
+    c.events->on_period_set(ch, period);
   }
 }
 
-static void _pocketmod_volume_set(pocketmod_context* c, _pocketmod_chan* ch, uint8_t value) {
+static void _pocketmod_volume_set(_pocketmod_chan* ch, uint8_t value) {
 
   // note: volume can be up 0->63
 
@@ -165,21 +185,21 @@ static void _pocketmod_volume_set(pocketmod_context* c, _pocketmod_chan* ch, uin
 
   ch->real_volume = value;
 
-  if (c->events) {
-    c->events->on_volume_set(ch, value);
+  if (c.events) {
+    c.events->on_volume_set(ch, value);
   }
 }
 
-static void _pocketmod_balance_set(pocketmod_context* c, _pocketmod_chan* ch, uint8_t balance) {
+static void _pocketmod_balance_set(_pocketmod_chan* ch, uint8_t balance) {
 
   ch->balance = balance;
 
-  if (c->events) {
-    c->events->on_balance_set(ch, balance);
+  if (c.events) {
+    c.events->on_balance_set(ch, balance);
   }
 }
 
-static void _pocketmod_update_pitch(pocketmod_context *c, _pocketmod_chan *ch)
+static void _pocketmod_update_pitch(_pocketmod_chan *ch)
 {
     /* Don't do anything if the period is zero */
     ch->increment = 0.0f;
@@ -190,7 +210,7 @@ static void _pocketmod_update_pitch(pocketmod_context *c, _pocketmod_chan *ch)
         if (ch->effect == 0x4 || ch->effect == 0x6) {
             int32_t step = (ch->param4 >> 4) * ch->lfo_step;
             int32_t rate = ch->param4 & 0x0f;
-            period += _pocketmod_lfo(c, ch, step) * rate / 128.0f;
+            period += _pocketmod_lfo(ch, step) * rate / 128.0f;
 
         /* Apply arpeggio (if active) */
         } else if (ch->effect == 0x0 && ch->param) {
@@ -200,26 +220,26 @@ static void _pocketmod_update_pitch(pocketmod_context *c, _pocketmod_chan *ch)
                 1.587401f, 1.681793f, 1.781797f, 1.887749f,
                 2.000000f, 2.118926f, 2.244924f, 2.378414f
             };
-            int32_t step = (ch->param >> ((2 - c->tick % 3) << 2)) & 0x0f;
+            int32_t step = (ch->param >> ((2 - c.tick % 3) << 2)) & 0x0f;
             period /= arpeggio[step];
         }
 
         /* Calculate sample buffer position increment */
-        _pocketmod_period_set(c, ch, period);
+        _pocketmod_period_set(ch, period);
     }
 
     /* Clear the pitch dirty flag */
     ch->dirty &= ~POCKETMOD_PITCH;
 }
 
-static void _pocketmod_update_volume(pocketmod_context *c, _pocketmod_chan *ch)
+static void _pocketmod_update_volume(_pocketmod_chan *ch)
 {
     int32_t volume = ch->volume;
     if (ch->effect == 0x7) {
         int32_t step = ch->lfo_step * (ch->param7 >> 4);
-        volume += _pocketmod_lfo(c, ch, step) * (ch->param7 & 0x0f) >> 6;
+        volume += _pocketmod_lfo(ch, step) * (ch->param7 & 0x0f) >> 6;
     }
-    _pocketmod_volume_set(c, ch, _pocketmod_clamp_volume(volume));
+    _pocketmod_volume_set(ch, _pocketmod_clamp_volume(volume));
     ch->dirty &= ~POCKETMOD_VOLUME;
 }
 
@@ -242,28 +262,28 @@ static void _pocketmod_volume_slide(_pocketmod_chan *ch, int32_t param)
     ch->dirty |= POCKETMOD_VOLUME;
 }
 
-static void _pocketmod_next_line(pocketmod_context *c)
+static void _pocketmod_next_line()
 {
     uint8_t (*data)[4];
     int32_t i, pos, pattern_break = -1;
 
     /* When entering a new pattern order index, mark it as "visited" */
-    if (c->line == 0) {
-        c->visited[c->pattern >> 3] |= 1 << (c->pattern & 7);
+    if (c.line == 0) {
+        c.visited[c.pattern >> 3] |= 1 << (c.pattern & 7);
     }
 
     /* Move to the next pattern if this was the last line */
-    if (++c->line == 64) {
-        if (++c->pattern == c->length) {
-            c->pattern = c->reset;
+    if (++c.line == 64) {
+        if (++c.pattern == c.length) {
+            c.pattern = c.reset;
         }
-        c->line = 0;
+        c.line = 0;
     }
 
     /* Find the pattern data for the current line */
-    pos = (c->order[c->pattern] * 64 + c->line) * c->num_channels * 4;
-    data = (uint8_t(*)[4]) (c->patterns + pos);
-    for (i = 0; i < c->num_channels; i++) {
+    pos = (c.order[c.pattern] * 64 + c.line) * c.num_channels * 4;
+    data = (uint8_t(*)[4]) (c.patterns + pos);
+    for (i = 0; i < c.num_channels; i++) {
 
         /* Decode columns */
         int32_t sample = (data[i][0] & 0xf0) | (data[i][2] >> 4);
@@ -271,22 +291,21 @@ static void _pocketmod_next_line(pocketmod_context *c)
         int32_t effect = ((data[i][2] & 0x0f) << 8) | data[i][3];
 
         /* Memorize effect parameter values */
-        _pocketmod_chan *ch = &c->channels[i];
+        _pocketmod_chan *ch = &c.channels[i];
         ch->effect = (effect >> 8) != 0xe ? (effect >> 8)   : (effect >> 4);
         ch->param  = (effect >> 8) != 0xe ? (effect & 0xff) : (effect & 0x0f);
 
         /* Set sample */
         if (sample) {
             if (sample <= POCKETMOD_MAX_SAMPLES) {
-                uint8_t *sample_data = POCKETMOD_SAMPLE(c, sample);
-                _pocketmod_sample_set(c, ch, sample);
-                ch->finetune = sample_data[2] & 0x0f;
-                ch->volume = _pocketmod_min(sample_data[3], 0x40);
+              _pocketmod_sample_set(ch, sample);
+                ch->finetune = c.samples[sample-1].finetune;
+                ch->volume   = c.samples[sample-1].volume;
                 if (ch->effect != 0xED) {
                     ch->dirty |= POCKETMOD_VOLUME;
                 }
             } else {
-                _pocketmod_sample_set(c, ch, 0);
+                _pocketmod_sample_set(ch, 0);
             }
         }
 
@@ -298,7 +317,7 @@ static void _pocketmod_next_line(pocketmod_context *c)
                 if (ch->effect != 0xED) {
                     ch->period = period;
                     ch->dirty |= POCKETMOD_PITCH;
-                    _pocketmod_position_set(c, ch, 0.0f);  // reset position
+                    _pocketmod_position_set(ch, 0.0f);  // reset position
                     ch->lfo_step = 0;
                 } else {
                     ch->delayed = period;
@@ -321,21 +340,21 @@ static void _pocketmod_next_line(pocketmod_context *c)
 
             /* 8xx: Set stereo balance (nonstandard) */
             case 0x8: {
-                _pocketmod_balance_set(c, ch, ch->param);
+                _pocketmod_balance_set(ch, ch->param);
             } break;
 
             /* 9xx: Set sample offset */
             case 0x9: {
                 if (period != 0 || sample != 0) {
                     ch->param9 = ch->param ? ch->param : ch->param9;
-                    _pocketmod_position_set(c, ch, (float)(ch->param9 << 8));
+                    _pocketmod_position_set(ch, (float)(ch->param9 << 8));
                 }
             } break;
 
             /* Bxx: Jump to pattern */
             case 0xB: {
-                c->pattern = ch->param < c->length ? ch->param : 0;
-                c->line = -1;
+                c.pattern = ch->param < c.length ? ch->param : 0;
+                c.line = -1;
             } break;
 
             /* Cxx: Set volume */
@@ -365,12 +384,12 @@ static void _pocketmod_next_line(pocketmod_context *c)
                 if (ch->param) {
                     if (!ch->loop_count) {
                         ch->loop_count = ch->param;
-                        c->line = ch->loop_line;
+                        c.line = ch->loop_line;
                     } else if (--ch->loop_count) {
-                        c->line = ch->loop_line;
+                        c.line = ch->loop_line;
                     }
                 } else {
-                    ch->loop_line = c->line - 1;
+                    ch->loop_line = c.line - 1;
                 }
             } break;
 
@@ -381,22 +400,22 @@ static void _pocketmod_next_line(pocketmod_context *c)
 
             /* E8x: Set stereo balance (nonstandard) */
             case 0xE8: {
-                _pocketmod_balance_set(c, ch, ch->param << 4);
+                _pocketmod_balance_set(ch, ch->param << 4);
             } break;
 
             /* EEx: Pattern delay */
             case 0xEE: {
-                c->pattern_delay = ch->param;
+                c.pattern_delay = ch->param;
             } break;
 
             /* Fxx: Set speed */
             case 0xF: {
                 if (ch->param != 0) {
                     if (ch->param < 0x20) {
-                        c->ticks_per_line = ch->param;
+                        c.ticks_per_line = ch->param;
                     } else {
-                        c->ticks_per_second = (0.4f * ch->param);
-                        c->samples_per_tick = c->samples_per_second / c->ticks_per_second;
+                        c.ticks_per_second = (0.4f * ch->param);
+                        c.samples_per_tick = c.samples_per_second / c.ticks_per_second;
                     }
                 }
             } break;
@@ -409,34 +428,34 @@ static void _pocketmod_next_line(pocketmod_context *c)
     /* when multiple Dxy commands appear on the same line. (You guessed it: */
     /* There are songs that rely on this behavior!)                         */
     if (pattern_break != -1) {
-        c->line = (pattern_break < 64 ? pattern_break : 0) - 1;
-        if (++c->pattern == c->length) {
-            c->pattern = c->reset;
+        c.line = (pattern_break < 64 ? pattern_break : 0) - 1;
+        if (++c.pattern == c.length) {
+            c.pattern = c.reset;
         }
     }
 }
 
-static void _pocketmod_next_tick(pocketmod_context *c)
+static void _pocketmod_next_tick()
 {
     int32_t i;
 
     /* Move to the next line if this was the last tick */
-    if (++c->tick == c->ticks_per_line) {
-        if (c->pattern_delay > 0) {
-            c->pattern_delay--;
+    if (++c.tick == c.ticks_per_line) {
+        if (c.pattern_delay > 0) {
+            c.pattern_delay--;
         } else {
             _pocketmod_next_line(c);
         }
-        c->tick = 0;
+        c.tick = 0;
     }
 
     /* Make per-tick adjustments for all channels */
-    for (i = 0; i < c->num_channels; i++) {
-        _pocketmod_chan *ch = &c->channels[i];
+    for (i = 0; i < c.num_channels; i++) {
+        _pocketmod_chan *ch = &c.channels[i];
         int32_t param = ch->param;
 
         /* Advance the LFO random number generator */
-        c->lfo_rng = 0x0019660d * c->lfo_rng + 0x3c6ef35f;
+        c.lfo_rng = 0x0019660d * c.lfo_rng + 0x3c6ef35f;
 
         /* Handle effects that may happen on any tick of a line */
         switch (ch->effect) {
@@ -448,15 +467,15 @@ static void _pocketmod_next_tick(pocketmod_context *c)
 
             /* E9x: Retrigger note every x ticks */
             case 0xE9: {
-                if (!(param && c->tick % param)) {
-                    _pocketmod_position_set(c, ch, 0.0f);
+                if (!(param && c.tick % param)) {
+                    _pocketmod_position_set(ch, 0.0f);
                     ch->lfo_step = 0;
                 }
             } break;
 
             /* ECx: Cut note after x ticks */
             case 0xEC: {
-                if (c->tick == param) {
+                if (c.tick == param) {
                     ch->volume = 0;
                     ch->dirty |= POCKETMOD_VOLUME;
                 }
@@ -464,10 +483,10 @@ static void _pocketmod_next_tick(pocketmod_context *c)
 
             /* EDx: Delay note for x ticks */
             case 0xED: {
-                if (c->tick == param && ch->sample) {
+                if (c.tick == param && ch->sample) {
                     ch->dirty |= POCKETMOD_VOLUME | POCKETMOD_PITCH;
                     ch->period = ch->delayed;
-                    _pocketmod_position_set(c, ch, 0.f);
+                    _pocketmod_position_set(ch, 0.f);
                     ch->lfo_step = 0;
                 }
             } break;
@@ -476,7 +495,7 @@ static void _pocketmod_next_tick(pocketmod_context *c)
         }
 
         /* Handle effects that only happen on the first tick of a line */
-        if (c->tick == 0) {
+        if (c.tick == 0) {
             switch (ch->effect) {
                 case 0xE1: _pocketmod_pitch_slide (ch, -ch->paramE1);     break;
                 case 0xE2: _pocketmod_pitch_slide (ch, +ch->paramE2);     break;
@@ -541,19 +560,18 @@ static void _pocketmod_next_tick(pocketmod_context *c)
         }
 
         /* Update channel volume/pitch if either is out of date */
-        if (ch->dirty & POCKETMOD_VOLUME) { _pocketmod_update_volume(c, ch); }
-        if (ch->dirty & POCKETMOD_PITCH)  { _pocketmod_update_pitch (c, ch); }
+        if (ch->dirty & POCKETMOD_VOLUME) { _pocketmod_update_volume(ch); }
+        if (ch->dirty & POCKETMOD_PITCH)  { _pocketmod_update_pitch (ch); }
     }
 }
 
-static void _pocketmod_render_channel(pocketmod_context *c,
-                                      _pocketmod_chan *chan,
+static void _pocketmod_render_channel(_pocketmod_chan *chan,
                                       int16_t *output,
                                       int32_t samples_to_write)
 {
     /* Gather some loop data */
-    _pocketmod_sample *sample = &c->samples[chan->sample - 1];
-    uint8_t *data = POCKETMOD_SAMPLE(c, chan->sample);
+    _pocketmod_sample *sample = &c.samples[chan->sample - 1];
+    uint8_t* data = sample->data;
     const float sample_end = (float)(1 + _pocketmod_min(sample->loop_end, sample->length));
 
     /* Calculate left/right levels */
@@ -597,7 +615,7 @@ static void _pocketmod_render_channel(pocketmod_context *c,
     } while (num > 0);
 }
 
-static int32_t _pocketmod_ident(pocketmod_context *c, uint8_t *data, int32_t size)
+static int32_t _pocketmod_ident(uint8_t *data, int32_t size)
 {
     int32_t i, j;
 
@@ -630,12 +648,19 @@ static int32_t _pocketmod_ident(pocketmod_context *c, uint8_t *data, int32_t siz
         for (i = 0; i < (int32_t) (sizeof(tags) / sizeof(*tags)); i++) {
             if (tags[i].name[0] == tag[0] && tags[i].name[1] == tag[1]
              && tags[i].name[2] == tag[2] && tags[i].name[3] == tag[3]) {
-                c->num_channels = tags[i].channels;
-                c->length = data[950];
-                c->reset = data[951];
-                c->order = &data[952];
-                c->patterns = &data[1084];
-                c->num_samples = 31;
+
+                c.num_channels = tags[i].channels;
+                if (c.num_channels > 4) {
+                  return 0;  // we only handle 4 channels currently
+                }
+
+                file_seek_to(950); c.length = read_u8();
+                file_seek_to(951); c.reset  = read_u8();
+
+                file_seek_to(952);
+                fread(c.order, 1, 128, file);
+                c.patterns    = &data[1084];  // fixme
+                c.num_samples = 31;
                 return 1;
             }
         }
@@ -664,72 +689,72 @@ static int32_t _pocketmod_ident(pocketmod_context *c, uint8_t *data, int32_t siz
     }
 
     /* It looks like we have an older 15-instrument MOD */
-    c->length       = data[470];
-    c->reset        = data[471];
-    c->order        = &data[472];
-    c->patterns     = &data[600];
-    c->num_samples  = 15;
-    c->num_channels = 4;
+    file_seek_to(470); c.length = read_u8();
+    file_seek_to(471); c.reset  = read_u8();
+
+    file_seek_to(472);
+    fread(c.order, 1, 128, file);
+    c.patterns     = &data[600];  // fixme
+    c.num_samples  = 15;
+    c.num_channels = 4;
     return 1;
 }
 
-int32_t pocketmod_init(pocketmod_context *c, pocketmod_events* e, const void *data, int32_t size, int32_t rate)
+int32_t pocketmod_init(pocketmod_events* e, FILE *fd, const void *data, int32_t size, int32_t rate)
 {
-
+    file = fd;
     int32_t i, remaining, header_bytes, pattern_bytes;
-    uint8_t *byte = (uint8_t*) c;
-    int8_t *sample_data;
+    uint32_t sample_offset = 0;
 
     /* Check that arguments look more or less sane */
-    if (!c || !data || rate <= 0 || size <= 0) {
+    if (!file || !data || rate <= 0 || size <= 0) {
         return 0;
     }
 
     /* Zero out the whole context and identify the MOD type */
-    _pocketmod_zero(c, sizeof(pocketmod_context));
-    c->source = (uint8_t*) data;
-    if (!_pocketmod_ident(c, c->source, size)) {
+    _pocketmod_zero(&c, sizeof(pocketmod_context));
+    if (!_pocketmod_ident(data, size)) {
         return 0;
     }
 
     /* Check that we are compiled with support for enough channels */
-    if (c->num_channels > POCKETMOD_MAX_CHANNELS) {
+    if (c.num_channels > POCKETMOD_MAX_CHANNELS) {
         return 0;
     }
 
     /* Check that we have enough sample slots for this file */
     if (POCKETMOD_MAX_SAMPLES < 31) {
-        byte = (uint8_t*) data + 20;
-        for (i = 0; i < c->num_samples; i++) {
-            uint32_t length = 2 * ((byte[22] << 8) | byte[23]);
+        file_seek_to(20 + 22);
+        for (i = 0; i < c.num_samples; i++) {
+            const uint32_t length = read_u16() << 1;
             if (i >= POCKETMOD_MAX_SAMPLES && length > 2) {
                 return 0; /* Can't fit this sample */
             }
-            byte += 30;
+            file_skip(30 - 2);
         }
     }
 
     /* Check that the song length is in valid range (1..128) */
-    if (c->length == 0 || c->length > 128) {
+    if (c.length == 0 || c.length > 128) {
         return 0;
     }
 
     /* Make sure that the reset pattern doesn't take us out of bounds */
-    if (c->reset >= c->length) {
-        c->reset = 0;
+    if (c.reset >= c.length) {
+        c.reset = 0;
     }
 
     /* Count how many patterns there are in the file */
-    c->num_patterns = 0;
-    for (i = 0; i < 128 && c->order[i] < 128; i++) {
-        c->num_patterns = _pocketmod_max(c->num_patterns, c->order[i]);
+    c.num_patterns = 0;
+    for (i = 0; i < 128 && c.order[i] < 128; i++) {
+        c.num_patterns = _pocketmod_max(c.num_patterns, c.order[i]);
     }
-    pattern_bytes = 256 * c->num_channels * ++c->num_patterns;
-    header_bytes = (int32_t) ((char*) c->patterns - (char*) data);
+    pattern_bytes = 256 * c.num_channels * ++c.num_patterns;
+    header_bytes  = (int32_t) ((char*) c.patterns - (char*) data);
 
     /* Check that each pattern in the order is within file bounds */
-    for (i = 0; i < c->length; i++) {
-        if (header_bytes + 256 * c->num_channels * c->order[i] > size) {
+    for (i = 0; i < c.length; i++) {
+        if (header_bytes + 256 * c.num_channels * c.order[i] > size) {
             return 0; /* Reading this pattern would be a buffer over-read! */
         }
     }
@@ -740,75 +765,78 @@ int32_t pocketmod_init(pocketmod_context *c, pocketmod_events* e, const void *da
     }
 
     /* setup event notifiers */
-    c->events = e;
+    c.events = e;
 
     //DEBUG: used to calcuate the total required sample space
     uint32_t total_size = 0;
 
     /* Load sample payload data, truncating ones that extend outside the file */
     remaining = size - header_bytes - pattern_bytes;
-    sample_data = (int8_t*) data + header_bytes + pattern_bytes;
-    for (i = 0; i < c->num_samples; i++) {
-        uint8_t *data = POCKETMOD_SAMPLE(c, i + 1);
-        uint32_t length = ((data[0] << 8) | data[1]) << 1;
+    sample_offset = header_bytes + pattern_bytes;
+    for (i = 0; i < c.num_samples; i++) {
 
-        _pocketmod_sample *sample = &c->samples[i];
+        file_seek_to(12 + 30 * (i + 1));
+        uint32_t length = read_u16() << 1;
+
+        _pocketmod_sample *sample = &c.samples[i];
         sample->index       = i;
-        sample->data        = sample_data;
+        sample->data        = (int8_t*)data + sample_offset;
         sample->length      = _pocketmod_min(length > 2 ? length : 0, remaining);
-        sample->loop_start  = ((data[4] << 8) | data[5]) << 1;
-        sample->loop_length = ((data[6] << 8) | data[7]) << 1;
+        sample->finetune    = read_u8() & 0xf;
+        sample->volume      = _pocketmod_min(read_u8(), 0x40);
+        sample->loop_start  = (read_u16()) << 1;
+        sample->loop_length = (read_u16()) << 1;
         sample->loop_end    = sample->loop_length > 2 ? sample->loop_start + sample->loop_length : 0xffffff;
 
-        _pocketmod_upload_sample(c, sample);
+        _pocketmod_upload_sample(sample);
 
         //DEBUG: calculate the used sample size
         total_size += _pocketmod_min(sample->loop_end, sample->length);
 
-        sample_data += sample->length;
-        remaining   -= sample->length;
+        sample_offset += sample->length;
+        remaining     -= sample->length;
     }
 
     //DEBUG: print to total required sample space
     printf("total sample size: %uKB (%u bytes)\n", total_size / 1024, total_size);
 
     /* Set up ProTracker default panning for all channels */
-    for (i = 0; i < c->num_channels; i++) {
-        c->channels[i].index = i;
+    for (i = 0; i < c.num_channels; i++) {
+        c.channels[i].index = i;
         uint8_t balance = 0x80 + ((((i + 1) >> 1) & 1) ? 0x20 : -0x20);
-        _pocketmod_balance_set(c, c->channels + i, balance);
+        _pocketmod_balance_set(c.channels + i, balance);
     }
 
     /* Prepare to render from the start */
-    c->ticks_per_line = 6;
-    c->samples_per_second = rate;
-    c->ticks_per_second = 50.f;
-    c->samples_per_tick = rate / c->ticks_per_second;
-    c->lfo_rng = 0xbadc0de;
-    c->line = -1;
-    c->tick = c->ticks_per_line - 1;
+    c.ticks_per_line     = 6;
+    c.samples_per_second = rate;
+    c.ticks_per_second   = 50.f;
+    c.samples_per_tick   = rate / c.ticks_per_second;
+    c.lfo_rng            = 0xbadc0de;
+    c.line               = -1;
+    c.tick               = c.ticks_per_line - 1;
     _pocketmod_next_tick(c);
     return 1;
 }
 
-int32_t pocketmod_render(pocketmod_context *c, void *buffer, int32_t buffer_size)
+int32_t pocketmod_render(void *buffer, int32_t buffer_size)
 {
     int32_t i, samples_rendered = 0;
     int32_t samples_remaining = buffer_size / POCKETMOD_SAMPLE_SIZE;
-    if (c && buffer) {
+    if (buffer) {
         int16_t (*output)[2] = (int16_t(*)[2]) buffer;
         while (samples_remaining > 0) {
 
             /* Calculate the number of samples left in this tick */
-            int32_t num = (int32_t) (c->samples_per_tick - c->sample);
+            int32_t num = (int32_t) (c.samples_per_tick - c.sample);
             num = _pocketmod_min(num + !num, samples_remaining);
 
             /* Render and mix 'num' samples from each channel */
             _pocketmod_zero(output, num * POCKETMOD_SAMPLE_SIZE);
-            for (i = 0; i < c->num_channels; i++) {
-                _pocketmod_chan *chan = &c->channels[i];
+            for (i = 0; i < c.num_channels; i++) {
+                _pocketmod_chan *chan = &c.channels[i];
                 if (chan->sample != 0 && chan->position >= 0.0f) {
-                    _pocketmod_render_channel(c, chan, *output, num);
+                    _pocketmod_render_channel(chan, *output, num);
                 }
             }
             samples_remaining -= num;
@@ -816,17 +844,17 @@ int32_t pocketmod_render(pocketmod_context *c, void *buffer, int32_t buffer_size
             output            += num;
 
             /* Advance song position by 'num' samples */
-            if ((c->sample += num) >= c->samples_per_tick) {
-                c->sample -= c->samples_per_tick;
+            if ((c.sample += num) >= c.samples_per_tick) {
+                c.sample -= c.samples_per_tick;
                 _pocketmod_next_tick(c);
 
                 /* Stop if a new pattern was reached */
-                if (c->line == 0 && c->tick == 0) {
+                if (c.line == 0 && c.tick == 0) {
 
                     /* Increment loop counter as needed */
-                    if (c->visited[c->pattern >> 3] & (1 << (c->pattern & 7))) {
-                        _pocketmod_zero(c->visited, sizeof(c->visited));
-                        c->loop_count++;
+                    if (c.visited[c.pattern >> 3] & (1 << (c.pattern & 7))) {
+                        _pocketmod_zero(c.visited, sizeof(c.visited));
+                        c.loop_count++;
                     }
                     break;
                 }
@@ -836,20 +864,20 @@ int32_t pocketmod_render(pocketmod_context *c, void *buffer, int32_t buffer_size
     return samples_rendered * POCKETMOD_SAMPLE_SIZE;
 }
 
-int32_t pocketmod_loop_count(pocketmod_context *c)
+int32_t pocketmod_loop_count()
 {
-    return c->loop_count;
+    return c.loop_count;
 }
 
-int32_t pocketmod_tick(pocketmod_context* c)
+int32_t pocketmod_tick()
 {
   _pocketmod_next_tick(c);
   /* If a new pattern was reached... */
-  if (c->line == 0 && c->tick == 0) {
+  if (c.line == 0 && c.tick == 0) {
     /* Increment loop counter as needed */
-    if (c->visited[c->pattern >> 3] & (1 << (c->pattern & 7))) {
-      _pocketmod_zero(c->visited, sizeof(c->visited));
-      c->loop_count++;
+    if (c.visited[c.pattern >> 3] & (1 << (c.pattern & 7))) {
+      _pocketmod_zero(c.visited, sizeof(c.visited));
+      c.loop_count++;
     }
   }
   return 0;

@@ -10,7 +10,7 @@ static void audio_callback(void *userdata, Uint8 *buffer, int bytes)
 {
     int i = 0;
     while (i < bytes) {
-        i += pocketmod_render(userdata, buffer + i, bytes - i);
+        i += pocketmod_render(buffer + i, bytes - i);
     }
 }
 
@@ -20,10 +20,8 @@ int main(int argc, char **argv)
 
     const Uint32 allowed_changes = SDL_AUDIO_ALLOW_FREQUENCY_CHANGE;
     Uint32 start_time;
-    pocketmod_context context = { 0 };
     SDL_AudioSpec format;
     SDL_AudioDeviceID device;
-    SDL_RWops *mod_file;
     char *mod_data, *slash;
     size_t mod_size;
     pocketmod_events events = { 0 };
@@ -46,13 +44,15 @@ int main(int argc, char **argv)
     format.channels = 2;
     format.samples  = 4096;
     format.callback = audio_callback;
-    format.userdata = &context;
+    format.userdata = 0;
     device = SDL_OpenAudioDevice(NULL, 0, &format, &format, allowed_changes);
     if (!device) {
         printf("error: SDL_OpenAudioDevice() failed: %s\n", SDL_GetError());
         return -1;
     }
 
+#if 0
+    SDL_RWops* mod_file;
     /* Read the MOD file into a heap block */
     if (!(mod_file = SDL_RWFromFile(argv[1], "rb"))) {
         printf("error: can't open '%s' for reading\n", argv[1]);
@@ -65,9 +65,25 @@ int main(int argc, char **argv)
         return -1;
     }
     SDL_RWclose(mod_file);
+#else
+    FILE* mod_file = fopen(argv[1], "rb");
+    if (!mod_file) {
+      printf("error: can't open '%s' for reading\n", argv[1]);
+      return -1;
+    }
+    fseek(mod_file, 0, SEEK_END);
+    mod_size = ftell(mod_file);
+    fseek(mod_file, 0, SEEK_SET);
+    mod_data = malloc(mod_size);
+    if (!mod_data) {
+      return -1;
+    }
+    fread(mod_data, 1, mod_size, mod_file);
+    fseek(mod_file, 0, SEEK_SET);
+#endif
 
     /* Initialize the renderer */
-    if (!pocketmod_init(&context, NULL, mod_data, (int32_t)mod_size, format.freq)) {
+    if (!pocketmod_init(NULL, mod_file, mod_data, (int32_t)mod_size, format.freq)) {
         printf("error: '%s' is not a valid MOD file\n", argv[1]);
         return -1;
     }
