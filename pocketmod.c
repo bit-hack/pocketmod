@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "pocketmod.h"
 
@@ -130,7 +131,7 @@ static int32_t _pocketmod_lfo(_pocketmod_chan *ch, int32_t step)
     }
 }
 
-static void _pocketmod_upload_sample(_pocketmod_sample* sample) {
+static void _pocketmod_upload_sample(_pocketmod_sample* sample, uint32_t sample_offset) {
 
   if (c.events) {
     c.events->on_upload_sample(sample);
@@ -659,7 +660,8 @@ static int32_t _pocketmod_ident(uint8_t *data, int32_t size)
 
                 file_seek_to(952);
                 fread(c.order, 1, 128, file);
-                c.patterns    = &data[1084];  // fixme
+                c.pattern_addr = 1084;
+//              c.patterns    = &data[1084];  // fixme
                 c.num_samples = 31;
                 return 1;
             }
@@ -694,7 +696,8 @@ static int32_t _pocketmod_ident(uint8_t *data, int32_t size)
 
     file_seek_to(472);
     fread(c.order, 1, 128, file);
-    c.patterns     = &data[600];  // fixme
+    c.pattern_addr = 600;
+//  c.patterns     = &data[600];  // fixme
     c.num_samples  = 15;
     c.num_channels = 4;
     return 1;
@@ -750,7 +753,11 @@ int32_t pocketmod_init(pocketmod_events* e, FILE *fd, const void *data, int32_t 
         c.num_patterns = _pocketmod_max(c.num_patterns, c.order[i]);
     }
     pattern_bytes = 256 * c.num_channels * ++c.num_patterns;
-    header_bytes  = (int32_t) ((char*) c.patterns - (char*) data);
+    header_bytes  = c.pattern_addr;
+
+    c.patterns = malloc(pattern_bytes);
+    file_seek_to(c.pattern_addr);
+    fread(c.patterns, 1, pattern_bytes, file);
 
     /* Check that each pattern in the order is within file bounds */
     for (i = 0; i < c.length; i++) {
@@ -780,7 +787,6 @@ int32_t pocketmod_init(pocketmod_events* e, FILE *fd, const void *data, int32_t 
 
         _pocketmod_sample *sample = &c.samples[i];
         sample->index       = i;
-        sample->data        = (int8_t*)data + sample_offset;
         sample->length      = _pocketmod_min(length > 2 ? length : 0, remaining);
         sample->finetune    = read_u8() & 0xf;
         sample->volume      = _pocketmod_min(read_u8(), 0x40);
@@ -788,7 +794,16 @@ int32_t pocketmod_init(pocketmod_events* e, FILE *fd, const void *data, int32_t 
         sample->loop_length = (read_u16()) << 1;
         sample->loop_end    = sample->loop_length > 2 ? sample->loop_start + sample->loop_length : 0xffffff;
 
-        _pocketmod_upload_sample(sample);
+#if 0
+        sample->data = (int8_t*)data + sample_offset;
+#else
+        sample->data = malloc(sample->length);
+        if (sample->data) {
+          file_seek_to(sample_offset);
+          fread(sample->data, 1, sample->length, file);
+        }
+#endif
+        _pocketmod_upload_sample(sample, sample_offset);
 
         //DEBUG: calculate the used sample size
         total_size += _pocketmod_min(sample->loop_end, sample->length);

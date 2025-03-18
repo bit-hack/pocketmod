@@ -93,8 +93,8 @@ struct pocketmod_context
 
     /* Read-only song data */
     _pocketmod_sample samples[POCKETMOD_MAX_SAMPLES];
-//  uint8_t *source;             /* Pointer to source MOD data              */
-    uint8_t  order[128];         /* Pattern order table                     */ /* fixme: malloc? */
+    uint8_t  order[128];         /* Pattern order table                     */
+    uint32_t pattern_addr;
     uint8_t *patterns;           /* Start of pattern data                   */
     uint8_t  length;             /* Patterns in the order (1..128)          */
     uint8_t  reset;              /* Pattern to loop back to (0..127)        */
